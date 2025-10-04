@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+
+<section layout:fragment="content"
+         th:with="pageTitle='Dashboard', activePage='dashboard'">
+
+  <h1 class="mb-4">Work & Project Time Tracking</h1>
+
+  <!-- Controls table -->
+  <div class="card mb-3">
+    <div class="card-body p-2">
+      <table class="table table-borderless mb-0 align-middle text-center">
+        <thead>
+          <tr>
+            <!-- Clock In -->
+            <th style="width:10%">
+              <button id="btnStartDay" class="btn btn-success w-100 py-3">Clock In</button>
+            </th>
+
+            <!-- Clock Out -->
+            <th style="width:10%">
+              <button id="btnStopDay" class="btn btn-danger w-100 py-3">Clock Out</button>
+            </th>
+
+            <!-- Workday info -->
+            <th style="width:40%" class="text-center align-middle">
+              <span id="currentDayInfo" class="text-muted fw-semibold fs-3"></span>
+            </th>
+
+            <!-- Project selector -->
+            <th style="width:60%">
+              <div class="d-flex gap-2 align-items-stretch">
+                <select id="projectSelect" class="form-select py-3">
+                  <option value="">Select active project…</option>
+                </select>
+              </div>
+            </th>
+            <th style="width:20%">
+              <div class="d-flex gap-2 align-items-stretch">
+                <button id="btnStartProject" class="btn btn-primary w-100 h-100 py-3">Start</button>
+              </div>
+            </th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+  </div>
+
+  <!-- Current Day -->
+  <div class="mb-4">
+    <h2>Current Day</h2>
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th style="width:20%">Start</th>
+          <th style="width:20%">End</th>
+          <th style="width:20%">Project</th>
+          <th style="width:30%">Comment</th>
+          <th style="width:10%">Action</th>
+        </tr>
+      </thead>
+      <tbody id="projectWorktimeRows"></tbody>
+    </table>
+  </div>
+
+  <!-- Last N Days -->
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h2 class="mb-0">Last Days</h2>
+    <div class="input-group" style="width: 200px;">
+      <span class="input-group-text">Show</span>
+      <input type="number" class="form-control" id="daysCount" min="1" value="10" style="width:40px;">
+      <span class="input-group-text">days</span>
+    </div>
+  </div>
+  <table class="table table-sm table-bordered">
+    <thead>
+      <tr>
+        <th style="width:20%">Start</th>
+        <th style="width:20%">End</th>
+        <th style="width:60%">Projects</th>
+      </tr>
+    </thead>
+    <tbody id="allDaysRows"></tbody>
+  </table>
+
+  <!-- JS -->
+  <script>
+    const btnStartDay = document.getElementById('btnStartDay');
+    const btnStopDay = document.getElementById('btnStopDay');
+    const btnStartProject = document.getElementById('btnStartProject');
+    const projectSelect = document.getElementById('projectSelect');
+    const daysInput = document.getElementById('daysCount');
+    const currentDayInfo = document.getElementById('currentDayInfo');
+
+    let workdays = [];
+
+    btnStartDay.addEventListener('click', async () => {
+      await apiCall('/api/worktime/start', 'POST', {}, 'Workday started');
+      loadDashboard();
+    });
+
+    btnStopDay.addEventListener('click', async () => {
+      await apiCall('/api/worktime/stop', 'POST', {}, 'Workday stopped');
+      loadDashboard();
+    });
+
+    btnStartProject.addEventListener('click', async () => {
+      const projectId = projectSelect.value;
+      if (!projectId) {
+        showToast('Please select a project first','warning');
+        return;
+      }
+      if (!workdays.find(w => !w.endTime)) {
+        await apiCall('/api/worktime/start', 'POST', {}, 'Workday auto-started');
+      }
+      await apiCall(`/api/projecttime/${projectId}/start`, 'POST', {}, 'Project started');
+      loadDashboard();
+    });
+
+    async function stopProject(id){
+      const comment = await openCommentModal('Add Comment', '');
+      if (comment === null) return; // user cancelled
+      let url = `/api/projecttime/${id}/stop`;
+      if(comment) url += `?comment=${encodeURIComponent(comment)}`;
+      await apiCall(url,'POST',{},'Project stopped');
+      loadDashboard();
+    }
+
+    async function loadActiveProjects(){
+      const res = await fetch('/api/project/active');
+      if(res.ok){
+        const projects = await res.json();
+        projectSelect.innerHTML = '<option value="">Select active project…</option>' +
+          projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+      }
+    }
+
+    daysInput.addEventListener('change', renderLastDays);
+
+    async function loadDashboard(){
+      await loadActiveProjects();
+
+      const res = await fetch('/api/worktime/all');
+      if(!res.ok) {
+        showToast('Failed to load dashboard','danger');
+        return;
+      }
+      workdays = await res.json();
+
+      const projectRows = document.getElementById('projectWorktimeRows');
+      projectRows.innerHTML = '';
+
+      const current = workdays.find(w => !w.endTime);
+      if(current){
+        currentDayInfo.textContent = `Started: ${formatDateTime(current.startTime)}`;
+        (current.projectWorktimes||[]).forEach(p=>{
+          const tr=document.createElement('tr');
+          tr.innerHTML=`
+            <td>${formatDateTime(p.startTime)}</td>
+            <td>${p.endTime? formatDateTime(p.endTime) : 'running…'}</td>
+            <td>${p.projectName}</td>
+            <td>${p.comment??''}</td>
+            <td>${p.endTime?'' : `<button class="btn btn-warning btn-sm" onclick="stopProject(${p.projectId})">Stop</button>`}</td>`;
+          projectRows.appendChild(tr);
+        });
+      } else {
+        currentDayInfo.textContent = 'No active workday.';
+      }
+
+      renderLastDays();
+    }
+
+    function renderLastDays(){
+      const allRows = document.getElementById('allDaysRows');
+      const n = parseInt(daysInput.value) || 10;
+      allRows.innerHTML='';
+      workdays
+        .filter(w=>w.endTime)
+        .slice(0, n)
+        .forEach(w=>{
+          const tr=document.createElement('tr');
+          tr.innerHTML=`
+            <td>${formatDateTime(w.startTime)}</td>
+            <td>${formatDateTime(w.endTime)}</td>
+            <td>${(w.projectWorktimes||[]).map(p=>`<span class='badge bg-secondary me-1'>${p.projectName}${p.comment ? ' ('+p.comment+')' : ''}</span>`).join('')}</td>`;
+          allRows.appendChild(tr);
+        });
+    }
+
+    loadDashboard();
+  </script>
+</section>
+</html>

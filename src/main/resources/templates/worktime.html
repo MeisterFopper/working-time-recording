@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+
+<section layout:fragment="content"
+         th:with="pageTitle='Worktime', activePage='worktime'">
+
+  <h1 class="mb-4">Worktime</h1>
+
+  <table class="table table-hover align-middle" id="worktimeTable">
+    <thead class="table-dark">
+      <tr>
+        <th style="width:20%">Worktime / Project</th>
+        <th style="width:20%">Start</th>
+        <th style="width:20%">End</th>
+        <th style="width:40%">Comment</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    async function adjustStart(id, current) {
+      const newStart = await openDateTimeModal('Adjust START time', current);
+      if (!newStart) return;
+      await apiCall(`/api/worktime/${id}?startTime=${encodeURIComponent(newStart)}`,
+                    'PATCH', {}, 'Start time updated');
+      load();
+    }
+
+    async function adjustEnd(id, current) {
+      const newEnd = await openDateTimeModal('Adjust END time', current);
+      if (!newEnd) return;
+      await apiCall(`/api/worktime/${id}?endTime=${encodeURIComponent(newEnd)}`,
+                    'PATCH', {}, 'End time updated');
+      load();
+    }
+
+    async function adjustProjectStart(id, current) {
+      const newStart = await openDateTimeModal('Adjust PROJECT START time', current);
+      if (!newStart) return;
+      await apiCall(`/api/projecttime/${id}?startTime=${encodeURIComponent(newStart)}`,
+                    'PATCH', {}, 'Project start updated');
+      load();
+    }
+
+    async function adjustProjectEnd(id, current) {
+      const newEnd = await openDateTimeModal('Adjust PROJECT END time', current);
+      if (!newEnd) return;
+      await apiCall(`/api/projecttime/${id}?endTime=${encodeURIComponent(newEnd)}`,
+                    'PATCH', {}, 'Project end updated');
+      load();
+    }
+
+    async function adjustProjectComment(id, current) {
+      const newComment = await openCommentModal('Edit Comment', current);
+      if (newComment === null) return; // user canceled
+      if ((newComment || '') === (current || '')) return; // nothing changed
+      await apiCall(`/api/projecttime/${id}/comment?comment=${encodeURIComponent(newComment)}`,
+                    'PATCH', {}, 'Comment updated');
+      load();
+    }
+
+    function renderDayRow(day){
+      const dayLabel = weekdayName(day.startTime);
+      return `
+        <tr class="workday-row table-light">
+          <td><strong>${dayLabel}</strong></td>
+          <td class="text-nowrap">
+            <span class="me-2">${formatDateTime(day.startTime)}</span>
+            ${editBtn(`adjustStart(${day.id}, '${day.startTime}')`, 'warning')}
+          </td>
+          <td class="text-nowrap">
+            <span class="me-2">${formatDateTime(day.endTime) || 'running…'}</span>
+            ${editBtn(`adjustEnd(${day.id}, '${day.endTime ?? ''}')`, 'warning')}
+          </td>
+          <td></td>
+        </tr>
+      `;
+    }
+
+    function renderProjectRows(projects){
+      if(!projects || projects.length === 0) return '';
+      return projects.map(p => `
+        <tr class="project-row">
+          <td><span class="badge bg-secondary">${p.projectName}</span></td>
+          <td class="text-nowrap">
+            <span class="me-2">${formatDateTime(p.startTime)}</span>
+            ${editBtn(`adjustProjectStart(${p.id}, '${p.startTime}')`, 'warning')}
+          </td>
+          <td class="text-nowrap">
+            <span class="me-2">${formatDateTime(p.endTime) || 'running…'}</span>
+            ${editBtn(`adjustProjectEnd(${p.id}, '${p.endTime ?? ''}')`, 'warning')}
+          </td>
+          <td class="text-nowrap">
+            <span class="me-2">${p.comment ?? ''}</span>
+            ${editBtn(`adjustProjectComment(${p.id}, '${p.comment ?? ''}')`, 'warning')}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function load(){
+      const res = await fetch('/api/worktime/all');
+      if(!res.ok){
+        showToast('Failed to load worktime entries','danger');
+        return;
+      }
+      const data = await res.json();
+      const tbody = document.querySelector('#worktimeTable tbody');
+      tbody.innerHTML='';
+      data.forEach(d=>{
+        tbody.insertAdjacentHTML('beforeend', renderDayRow(d) + renderProjectRows(d.projectWorktimes));
+      });
+    }
+
+    load();
+  </script>
+
+</section>
+</html>

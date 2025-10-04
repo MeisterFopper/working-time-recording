@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout}"
+      lang="en">
+
+<section layout:fragment="content"
+         th:with="pageTitle='Projects', activePage='projects'">
+
+  <h1 class="mb-4">Projects</h1>
+
+  <!-- Create project -->
+  <div class="row g-2 mb-3">
+    <div class="col-md-4">
+      <input id="newProjectName" class="form-control" placeholder="Project name"/>
+    </div>
+    <div class="col-md-6">
+      <input id="newProjectDesc" class="form-control" placeholder="Project description (optional)"/>
+    </div>
+    <div class="col-md-2 d-grid">
+      <button class="btn btn-primary" id="btnCreateProject">Create</button>
+    </div>
+  </div>
+
+  <!-- Filter -->
+  <div class="d-flex justify-content-end mb-2">
+    <select id="filterSelect" class="form-select form-select-sm" style="width:auto;">
+      <option value="all" selected>Show: All</option>
+      <option value="active">Active only</option>
+      <option value="inactive">Inactive only</option>
+    </select>
+  </div>
+
+  <!-- Projects Table -->
+  <table class="table table-hover align-middle" id="projectsTable">
+    <thead class="table-dark">
+      <tr>
+        <th style="width:8%">Active</th>
+        <th style="width:30%">Name</th>
+        <th style="width:62%">Description</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const btnCreateProject = document.getElementById('btnCreateProject');
+    const tableBody = document.querySelector('#projectsTable tbody');
+    const filterSelect = document.getElementById('filterSelect');
+
+    let allProjects = []; // store fetched projects
+
+    btnCreateProject.addEventListener('click', async ()=> {
+      const name = document.getElementById('newProjectName').value.trim();
+      const desc = document.getElementById('newProjectDesc').value.trim();
+      if(!name) return;
+      await apiCall(`/api/project/create?projectName=${encodeURIComponent(name)}&description=${encodeURIComponent(desc)}`,
+                    'POST', {}, 'Project created');
+      document.getElementById('newProjectName').value = '';
+      document.getElementById('newProjectDesc').value = '';
+      loadProjects();
+    });
+
+    async function toggleActive(id, active){
+      await apiCall(`/api/project/${id}/${active ? 'deactivate' : 'activate'}`,
+                    'POST', {}, `Project ${active ? 'deactivated' : 'activated'}`);
+      loadProjects();
+    }
+
+    async function editName(id, current){
+      const newName = await openCommentModal('Edit Project Name', current);
+      if (newName === null || newName.trim() === '' || newName.trim() === current) return;
+      await apiCall(`/api/project/${id}/rename?name=${encodeURIComponent(newName.trim())}`,
+                    'PATCH', {}, 'Name updated');
+      loadProjects();
+    }
+
+    async function editDescription(id, current){
+      const newDesc = await openCommentModal('Edit Description', current);
+      if (newDesc === null || newDesc.trim() === current) return;
+      await apiCall(`/api/project/${id}/description?description=${encodeURIComponent(newDesc.trim())}`,
+                    'PATCH', {}, 'Description updated');
+      loadProjects();
+    }
+
+    filterSelect.addEventListener('change', renderProjects);
+
+    async function loadProjects(){
+      const res = await fetch('/api/project/all');
+      if(!res.ok){
+        showToast('Failed to load projects','danger');
+        return;
+      }
+      allProjects = await res.json();
+      renderProjects();
+    }
+
+    function renderProjects(){
+      const filter = filterSelect.value;
+      tableBody.innerHTML='';
+      allProjects
+        .filter(p =>
+          filter === 'all' ||
+          (filter === 'active' && p.active) ||
+          (filter === 'inactive' && !p.active)
+        )
+        .forEach(p=>{
+          tableBody.insertAdjacentHTML('beforeend', `
+            <tr>
+              <td class="text-center">
+                <button class="btn btn-sm ${p.active ? 'btn-success' : 'btn-outline-secondary'} w-100"
+                        style="min-width:80px;"
+                        onclick="toggleActive(${p.id},${p.active})">
+                  ${p.active ? 'Active' : 'Inactive'}
+                </button>
+              </td>
+              <td class="text-nowrap">
+                <span class="me-2">${p.name}</span>
+                <button class="btn btn-sm btn-warning btn-icon"
+                        onclick="editName(${p.id}, '${p.name || ''}')">
+                  <i class="bi bi-pencil"></i>
+                </button>
+              </td>
+              <td>
+                <span class="me-2">${p.description || ''}</span>
+                <button class="btn btn-sm btn-warning btn-icon"
+                        onclick="editDescription(${p.id}, '${p.description || ''}')">
+                  <i class="bi bi-pencil"></i>
+                </button>
+              </td>
+            </tr>
+          `);
+        });
+    }
+
+    loadProjects();
+  </script>
+
+</section>
+</html>

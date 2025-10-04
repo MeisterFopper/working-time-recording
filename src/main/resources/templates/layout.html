@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title layout:title-pattern="${pageTitle} :: TimeTracker">TimeTracker</title>
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+
+  <!-- Custom table styling -->
+  <style>
+    /* Strong separator between different workdays */
+    tr.workday-row {
+      border-top: 3px solid;
+    }
+    /* Better look for project rows */
+    tr.project-row td:first-child {
+      padding-left: 2rem;
+    }
+    /* Add to your layout.css or inside a <style> block in layout.html */
+    .table .btn-icon {
+      padding: 0.15rem 0.35rem;
+      font-size: 0.85rem;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body class="bg-light">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">TimeTracker</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav">
+        <li class="nav-item">
+          <a class="nav-link" th:classappend="${activePage=='dashboard'}? ' active'" href="/">Dashboard</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" th:classappend="${activePage=='projects'}? ' active'" href="/projects">Projects</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" th:classappend="${activePage=='worktime'}? ' active'" href="/worktime">Worktime</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" target="_blank" href="/swagger-ui.html">API Docs</a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- Date/Time Picker Modal -->
+<div class="modal fade" id="datetimeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="datetimeModalTitle">Adjust Time</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="datetime-local" class="form-control" id="datetimeModalInput">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="datetimeModalSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Comment Edit Modal -->
+<div class="modal fade" id="commentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="commentModalTitle">Edit Comment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <textarea class="form-control" id="commentModalInput" rows="4"
+                  placeholder="Enter your comment..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="commentModalSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Content slot -->
+<section class="container" layout:fragment="content">
+  <p style="color:red">DEFAULT CONTENT — should be replaced</p>
+</section>
+
+<!-- Toast container -->
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
+
+<!-- Toast + API helper -->
+<script>
+  /* ---- Toast helper ---- */
+  function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast align-items-center text-bg-${type} border-0 mb-2`;
+    toast.role = 'alert';
+    toast.ariaLive = 'assertive';
+    toast.ariaAtomic = 'true';
+    toast.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body">${message}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>`;
+    container.appendChild(toast);
+    const bsToast = new bootstrap.Toast(toast, { delay: 4000 });
+    bsToast.show();
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+  }
+
+  /* ---- Fetch wrapper ---- */
+  async function apiCall(url, method = 'POST', options = {}, successMessage = 'Action successful') {
+    try {
+      const res = await fetch(url, { method, ...options });
+      if (!res.ok) {
+        let errorText = res.statusText;
+        try {
+          const data = await res.json();
+          if (data && data.error) errorText = data.error;
+        } catch (_) {}
+        showToast(errorText, 'danger');
+        return null;
+      }
+      if (successMessage) showToast(successMessage, 'success');
+      const text = await res.text();
+      return text ? JSON.parse(text) : null;
+    } catch (err) {
+      console.error(err);
+      showToast('Network error', 'danger');
+      return null;
+    }
+  }
+
+  /* ---- Date formatting helpers ---- */
+  function weekdayName(isoString, locale = 'en-GB') {
+    const d = new Date(isoString);
+    return isNaN(d) ? '' : d.toLocaleDateString(locale, { weekday: 'long' });
+  }
+  function formatDateTime(isoString) {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    if (isNaN(d)) return isoString;
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${String(d.getFullYear()).slice(-2)} ` +
+           `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  /* ---- DateTime modal ---- */
+  let datetimeModalResolve;
+  function openDateTimeModal(title, currentValue = '') {
+    document.getElementById('datetimeModalTitle').textContent = title;
+    const input = document.getElementById('datetimeModalInput');
+    input.value = currentValue;
+    const modalEl = document.getElementById('datetimeModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+    setTimeout(()=>input.focus(),200);
+
+    return new Promise(resolve => {
+      datetimeModalResolve = resolve;
+      document.getElementById('datetimeModalSave').onclick = () => {
+        modal.hide();
+        resolve(input.value);
+      };
+    });
+  }
+  document.getElementById('datetimeModal').addEventListener('hidden.bs.modal', () => {
+    if (datetimeModalResolve) datetimeModalResolve(null);
+  });
+
+  /* ---- Comment modal ---- */
+  let commentModalResolve;
+  function openCommentModal(title, currentValue = '') {
+    document.getElementById('commentModalTitle').textContent = title;
+    const textarea = document.getElementById('commentModalInput');
+    textarea.value = currentValue || '';
+    const modalEl = document.getElementById('commentModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+    setTimeout(()=>textarea.focus(),200);
+
+    return new Promise(resolve => {
+      commentModalResolve = resolve;
+      document.getElementById('commentModalSave').onclick = () => {
+        modal.hide();
+        resolve(textarea.value.trim());
+      };
+    });
+  }
+  document.getElementById('commentModal').addEventListener('hidden.bs.modal', () => {
+    if (commentModalResolve) commentModalResolve(null);
+  });
+
+  /* --- Small pencil button helper --- */
+  function editBtn(onClick, color = 'warning') {
+    return `
+      <button type="button"
+              class="btn btn-sm btn-${color} btn-icon align-baseline text-black"
+              onclick="${onClick}">
+        <i class="bi bi-pencil"></i>
+      </button>
+    `;
+  }
+</script>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>
