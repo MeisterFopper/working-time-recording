@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -46,6 +47,7 @@ public class ProjectWorktimeController {
         ProjectEntity project = projectService.persistence()
                 .findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("Project with ID " + projectId + " not found."));
+        
         return mapper.toDto(projectWorktimeService.startProject(project, null));
     }
 
@@ -72,8 +74,24 @@ public class ProjectWorktimeController {
                         new IllegalArgumentException("ProjectWorktime with ID " + projectWorktimeId + " not found."));
 
         pw.setComment(comment);
-        ProjectWorktimeEntity saved = projectWorktimeService.persistence().save(pw);
 
-        return mapper.toDto(saved);
+        return mapper.toDto(projectWorktimeService.persistence().save(pw));
+    }
+
+    @Operation(summary = "Update start or end time of a workday")
+    @PatchMapping("/{id}")
+    public ProjectWorktime updateWorktime(@PathVariable Long id,
+                                    @RequestParam(required = false) String startTime,
+                                    @RequestParam(required = false) String endTime) {
+        var worktime = projectWorktimeService.persistence()
+                .findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Worktime with ID " + id + " not found"));
+
+        if (startTime != null)
+            worktime.setStartTime(LocalDateTime.parse(startTime));
+        if (endTime != null)
+            worktime.setEndTime(LocalDateTime.parse(endTime));
+
+        return mapper.toDto(projectWorktimeService.persistence().save(worktime));
     }
 }
